@@ -4,6 +4,7 @@ import AboutMe from './components/AboutMe';
 import Services from './components/Services';
 import Portfolio from './components/Portfolio';
 import Contact from './components/Contact';
+import Chatbot from './components/Chatbot';
 
 function App() {
   return (
@@ -14,6 +15,8 @@ function App() {
       <Services />
       <Portfolio />
       <Contact />
+      <Chatbot />
+
       
       <footer className="section text-center text-secondary" style={{ padding: '40px 0', borderTop: '1px solid var(--glass-border)' }}>
         <div className="container">
