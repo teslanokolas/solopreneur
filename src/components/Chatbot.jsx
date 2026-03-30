@@ -1,13 +1,32 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { MessageCircle, X, Send, Bot, User } from 'lucide-react';
+import { MessageCircle, X, Send, Bot, User, CheckCircle } from 'lucide-react';
 import OpenAI from 'openai';
+import { saveChatbotLead } from '../utils/googleSheets';
 
 // Khởi tạo client OpenAI với API tuỳ chỉnh
 const openai = new OpenAI({
   apiKey: "sk-4bd27113b7dc78d1-lh6jld-f4f9c69f",
   baseURL: "https://9router.vuhai.io.vn/v1",
-  dangerouslyAllowBrowser: true // Cho phép chạy trực tiếp trên Frontend (React)
+  dangerouslyAllowBrowser: true
 });
+
+// Prompt hệ thống với hướng dẫn trích xuất thông tin khách hàng
+const SYSTEM_PROMPT = `Bạn là một trợ lý ảo tư vấn công nghệ AI và Tự động hóa cho Chủ doanh nghiệp (Solopreneur). Tôn chỉ của bạn là: chuyên nghiệp, thân thiện, ngắn gọn.
+
+NHIỆM VỤ QUAN TRỌNG:
+- Tư vấn về dịch vụ AI và tự động hóa
+- Khuyến khích người dùng để lại thông tin liên hệ (tên, số điện thoại, email)
+- Khi người dùng cung cấp bất kỳ thông tin cá nhân nào (tên, SĐT, email), hãy thêm một block JSON ẩn vào CUỐI tin nhắn của bạn.
+- ĐẶC BIỆT, bạn phải tự suy luận thêm 2 trường sau dựa trên hội thoại:
+  1. "interest": Khách đang quan tâm đến sản phẩm/dịch vụ/vấn đề gì? (tự tóm tắt ngắn gọn)
+  2. "intent_level": Đánh giá mức độ sẵn sàng mua hàng: "hot" (rat tiem nang), "warm" (co quan tam thuc su), hoặc "cold" (chi hoi tham).
+  
+  Format bắt buộc:
+  <!--LEAD_DATA:{"name":"...","phone":"...","email":"...","interest":"...","intent_level":"..."}-->
+
+- Chỉ điền các trường mà khách hàng đã cung cấp hoặc bạn suy luận được.
+- KHÔNG bao giờ hiển thị block JSON này trong nội dung trả lời. Nó phải nằm ở cuối cùng và bị ẩn.
+- Nếu chưa có thông tin mới, KHÔNG thêm block JSON.`;
 
 export default function Chatbot() {
   const [isOpen, setIsOpen] = useState(false);
@@ -16,6 +35,9 @@ export default function Chatbot() {
   ]);
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
+  const [leadSaved, setLeadSaved] = useState(false);
+  const [savedInfo, setSavedInfo] = useState({});
+  const [sessionId] = useState(() => 'sess_' + Math.random().toString(36).substring(2, 11) + '_' + Date.now());
   const messagesEndRef = useRef(null);
 
   // Tự động cuộn xuống tin nhắn mới nhất
@@ -29,13 +51,53 @@ export default function Chatbot() {
     }
   }, [messages, isOpen]);
 
+  // Trích xuất thông tin khách hàng từ response AI
+  const extractLeadData = (content) => {
+    const match = content.match(/<!--LEAD_DATA:(.*?)-->/);
+    if (match) {
+      try {
+        const data = JSON.parse(match[1]);
+        // Xóa block JSON khỏi nội dung hiển thị
+        const cleanContent = content.replace(/<!--LEAD_DATA:.*?-->/, '').trim();
+        return { data, cleanContent };
+      } catch (e) {
+        return { data: null, cleanContent: content };
+      }
+    }
+    return { data: null, cleanContent: content };
+  };
+
+  // Lưu lead vào Google Sheets
+  const saveLeadToSheets = async (newData) => {
+    const merged = { ...savedInfo, ...newData };
+    // Chỉ lưu khi có ít nhất 1 thông tin liên hệ 
+    if (merged.name || merged.phone || merged.email) {
+      // Tạo chuỗi hội thoại
+      const conversationText = messages
+        .map(m => `${m.role === 'user' ? 'Khách' : 'Bot'}: ${m.content}`)
+        .join('\n');
+
+      await saveChatbotLead({
+        ...merged,
+        source: "Chatbot Landing Page",
+        sessionId: sessionId,
+        conversation: conversationText,
+      });
+
+      setSavedInfo(merged);
+      setLeadSaved(true);
+      // Ẩn thông báo sau 4 giây
+      setTimeout(() => setLeadSaved(false), 4000);
+    }
+  };
+
   const handleSend = async (e) => {
     e.preventDefault();
     if (!input.trim() || isLoading) return;
 
     const userMsg = input.trim();
     const newMessages = [...messages, { role: 'user', content: userMsg }];
-    
+
     setInput('');
     setMessages(newMessages);
     setIsLoading(true);
@@ -44,16 +106,21 @@ export default function Chatbot() {
       const completion = await openai.chat.completions.create({
         model: "ces-chatbot-gpt-5.4",
         messages: [
-          { 
-            role: "system", 
-            content: "Bạn là một trợ lý ảo tư vấn công nghệ AI và Tự động hóa cho Chủ doanh nghiệp (Solopreneur). Tôn chỉ của bạn là: chuyên nghiệp, thân thiện, ngắn gọn. Hãy giải đáp những thắc mắc của khách hàng, và cuối cùng luôn khuyến khích người dùng để lại thông tin liên hệ." 
-          },
+          { role: "system", content: SYSTEM_PROMPT },
           ...newMessages.map(m => ({ role: m.role, content: m.content }))
         ],
         temperature: 0.7,
       });
 
-      setMessages(prev => [...prev, { role: 'assistant', content: completion.choices[0].message.content }]);
+      const rawContent = completion.choices[0].message.content;
+      const { data: leadData, cleanContent } = extractLeadData(rawContent);
+
+      setMessages(prev => [...prev, { role: 'assistant', content: cleanContent }]);
+
+      // Nếu phát hiện thông tin khách hàng → lưu vào Sheets
+      if (leadData) {
+        saveLeadToSheets(leadData);
+      }
     } catch (error) {
       console.error("Lỗi API Chatbot:", error);
       setMessages(prev => [...prev, { role: 'assistant', content: 'Xin lỗi, tôi đang bị gián đoạn kết nối tới máy chủ AI. Bạn vui lòng gửi lại tin nhắn sau hoặc liên hệ trực tiếp nhé!' }]);
@@ -169,6 +236,24 @@ export default function Chatbot() {
             )}
             <div ref={messagesEndRef} />
           </div>
+
+          {/* Lead Saved Toast */}
+          {leadSaved && (
+            <div style={{
+              padding: '10px 16px',
+              background: 'rgba(16, 185, 129, 0.15)',
+              borderTop: '1px solid rgba(16, 185, 129, 0.3)',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '8px',
+              color: '#10b981',
+              fontSize: '0.85rem',
+              animation: 'fadeInUp 0.3s ease forwards'
+            }}>
+              <CheckCircle size={16} />
+              <span>Đã lưu thông tin liên hệ thành công!</span>
+            </div>
+          )}
 
           {/* Input Area */}
           <div style={{ padding: '16px', borderTop: '1px solid var(--glass-border)', background: 'rgba(0,0,0,0.2)' }}>

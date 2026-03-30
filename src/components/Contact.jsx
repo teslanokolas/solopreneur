@@ -1,7 +1,39 @@
-import React from 'react';
-import { Mail, Phone, MapPin } from 'lucide-react';
+import React, { useState } from 'react';
+import { Mail, Phone, MapPin, Loader2, CheckCircle, AlertCircle } from 'lucide-react';
+import { saveContactForm } from '../utils/googleSheets';
 
 export default function Contact() {
+  const [formData, setFormData] = useState({
+    name: '',
+    email: '',
+    message: ''
+  });
+  const [status, setStatus] = useState('idle'); // idle | loading | success | error
+
+  const handleChange = (e) => {
+    setFormData(prev => ({
+      ...prev,
+      [e.target.name]: e.target.value
+    }));
+  };
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    if (!formData.name || !formData.email) return;
+
+    setStatus('loading');
+    
+    try {
+      await saveContactForm(formData);
+      setStatus('success');
+      setFormData({ name: '', email: '', message: '' });
+      setTimeout(() => setStatus('idle'), 5000);
+    } catch (error) {
+      console.error(error);
+      setStatus('error');
+    }
+  };
+
   return (
     <section className="section">
       <div className="container">
@@ -38,24 +70,47 @@ export default function Contact() {
             </div>
             
             <div>
-              <form onSubmit={e => e.preventDefault()} style={{ display: 'grid', gap: '16px' }}>
+              <form onSubmit={handleSubmit} style={{ display: 'grid', gap: '16px' }}>
                 <div>
-                  <input type="text" placeholder="Tên của bạn" style={{ width: '100%', padding: '16px', borderRadius: '12px', background: 'rgba(0,0,0,0.5)', border: '1px solid var(--glass-border)', color: 'white', fontFamily: 'inherit', fontSize: '1rem', outline: 'none' }} />
+                  <input required name="name" value={formData.name} onChange={handleChange} type="text" placeholder="Tên của bạn" style={{ width: '100%', padding: '16px', borderRadius: '12px', background: 'rgba(0,0,0,0.5)', border: '1px solid var(--glass-border)', color: 'white', fontFamily: 'inherit', fontSize: '1rem', outline: 'none' }} />
                 </div>
                 <div>
-                  <input type="email" placeholder="Email của bạn" style={{ width: '100%', padding: '16px', borderRadius: '12px', background: 'rgba(0,0,0,0.5)', border: '1px solid var(--glass-border)', color: 'white', fontFamily: 'inherit', fontSize: '1rem', outline: 'none' }} />
+                  <input required name="email" value={formData.email} onChange={handleChange} type="email" placeholder="Email của bạn" style={{ width: '100%', padding: '16px', borderRadius: '12px', background: 'rgba(0,0,0,0.5)', border: '1px solid var(--glass-border)', color: 'white', fontFamily: 'inherit', fontSize: '1rem', outline: 'none' }} />
                 </div>
                 <div>
-                  <textarea placeholder="Bạn cần hỗ trợ công nghệ / AI nào?" rows="4" style={{ width: '100%', padding: '16px', borderRadius: '12px', background: 'rgba(0,0,0,0.5)', border: '1px solid var(--glass-border)', color: 'white', fontFamily: 'inherit', fontSize: '1rem', resize: 'vertical', outline: 'none' }}></textarea>
+                  <textarea name="message" value={formData.message} onChange={handleChange} placeholder="Bạn cần hỗ trợ công nghệ / AI nào?" rows="4" style={{ width: '100%', padding: '16px', borderRadius: '12px', background: 'rgba(0,0,0,0.5)', border: '1px solid var(--glass-border)', color: 'white', fontFamily: 'inherit', fontSize: '1rem', resize: 'vertical', outline: 'none' }}></textarea>
                 </div>
-                <button type="submit" className="btn btn-primary" style={{ width: '100%', padding: '16px', marginTop: '8px' }}>
-                  Gửi Yêu Cầu Tư Vấn
+                <button type="submit" disabled={status === 'loading'} className="btn btn-primary" style={{ width: '100%', padding: '16px', marginTop: '8px', opacity: status === 'loading' ? 0.7 : 1, cursor: status === 'loading' ? 'not-allowed' : 'pointer' }}>
+                  {status === 'loading' ? (
+                    <><Loader2 size={20} className="animate-spin" style={{ animation: 'spin 1s linear infinite' }} /> Đang gửi...</>
+                  ) : (
+                    'Gửi Yêu Cầu Tư Vấn'
+                  )}
                 </button>
+                
+                {status === 'success' && (
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: '#10b981', background: 'rgba(16, 185, 129, 0.1)', padding: '12px', borderRadius: '8px', border: '1px solid rgba(16, 185, 129, 0.2)' }}>
+                    <CheckCircle size={20} />
+                    <span>Cảm ơn bạn! Yêu cầu đã được gửi thành công.</span>
+                  </div>
+                )}
+                {status === 'error' && (
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: '#ef4444', background: 'rgba(239, 68, 68, 0.1)', padding: '12px', borderRadius: '8px', border: '1px solid rgba(239, 68, 68, 0.2)' }}>
+                    <AlertCircle size={20} />
+                    <span>Có lỗi xảy ra. Vui lòng thử lại sau.</span>
+                  </div>
+                )}
               </form>
             </div>
           </div>
         </div>
       </div>
+      <style dangerouslySetInnerHTML={{__html: `
+        @keyframes spin {
+          from { transform: rotate(0deg); }
+          to { transform: rotate(360deg); }
+        }
+      `}} />
     </section>
   );
 }
